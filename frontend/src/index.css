@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Optional: custom base styles */
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+}
+
+/* Optional: custom components or utilities can go here */
