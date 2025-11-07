@@ -9,6 +9,8 @@ interface Props {
   onPromptClick: (prompt: string) => void; // 👈 InputBox와 연결
 }
 
+
+
 const ChatWindow: React.FC<Props> = ({ messages, onPromptClick }) => {
   return (
     <div className="w-full max-w-full flex flex-col gap-3 h-[65vh] overflow-y-auto p-6 bg-white/70 rounded-2xl shadow-lg border border-green-100 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
