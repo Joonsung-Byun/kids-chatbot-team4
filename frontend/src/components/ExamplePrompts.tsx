@@ -5,14 +5,14 @@ interface Props {
 }
 
 const prompts = [
-  "🌳 주말에 아이랑 갈만한 공원 추천",
-  "🎨 비 오는 날 실내 체험장 알려줘",
-  "🚴 한남동 근처 자전거 탈 수 있는 곳"
+  "🌳 주말에 아이랑 갈만한 부산 공원 추천",
+  "🎨 비 오는 날 서울 실내 체험장 알려줘",
+  "🚴 성수동 근처 자전거 탈 수 있는 곳",
 ];
 
 const ExamplePrompts: React.FC<Props> = ({ onPromptClick }) => {
   return (
-    <div className="flex flex-wrap justify-center gap-3 mt-6 animate-fadeIn">
+    <div className="flex flex-wrap justify-center gap-3 animate-fadeIn">
       {prompts.map((text, i) => (
         <div
           key={i}
