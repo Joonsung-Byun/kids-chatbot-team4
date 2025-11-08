@@ -1,23 +1,20 @@
 # routers/weather.py
 """
-Weather Router - 팀원 구현 예정
-
-날씨 API 기반 도구
-
-아래는 예시 스케치입니다
+Weather Router - 날씨 API 연동 예정
 """
 
 from fastapi import APIRouter
-from pydantic import BaseModel
 
-router = APIRouter(prefix="/weather", tags=["Weather"])
+router = APIRouter(
+    prefix="/weather",
+    tags=["Weather"]
+)
 
-# TODO: 팀원 구현 예정
-# - 날씨 API 호출
-# - 실외 활동 적합성 판단
-# - LangGraph Tool 인터페이스
-
-@router.get("/current")
+@router.get(
+    "/current",
+    summary="현재 날씨 조회",
+    description="외부 날씨 API 호출 (구현 예정)"
+)
 async def get_current_weather():
-    """현재 날씨 조회 (TODO: 구현 예정)"""
+    """현재 날씨 도구 (팀원 구현 예정)"""
     return {"message": "날씨 API 구현 예정"}
