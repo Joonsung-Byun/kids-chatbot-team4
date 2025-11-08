@@ -22,12 +22,13 @@ RAG 파이프라인에서 시설 정보를 검색할 때 사용됩니다.
     results = client.search("한남동 놀이터", n_results=5)
 """
 
-from typing import List, Dict, Any, Optional
-import chromadb
 import os
 import hashlib
+from typing import List, Dict, Any, Optional
+
+import chromadb
 import numpy as np
-from chromadb.config import Settings as ChromaSettings
+
 from utils.config import get_settings
 from utils.logger import logger
 
@@ -79,25 +80,17 @@ class VectorClient:
             bool: GPU 환경이면 True, 로컬 CPU면 False
         """
         try:
-            # 코랩 환경 체크
-            if 'COLAB_RELEASE_TAG' in os.environ:
+            if "COLAB_RELEASE_TAG" in os.environ:
                 logger.info("🔍 코랩 환경 감지됨")
                 return True
-            
-            # GPU 가용성 체크
             import torch
             if torch.cuda.is_available():
                 logger.info("🔍 GPU 환경 감지됨")
                 return True
-            
-            # 로컬 CPU 환경
-            logger.info("🔍 로컬 CPU 환경 감지됨 (Mock 임베딩 사용)")
-            return False
-            
         except ImportError:
-            # torch 없으면 로컬 환경으로 판단
-            logger.info("🔍 torch 없음 - 로컬 환경으로 판단")
-            return False
+            logger.info("🔍 torch 미설치 - 로컬 CPU 환경으로 판단")
+        logger.info("🔍 CPU 환경 감지됨 (Mock 임베딩 사용)")
+        return False
     
     def _connect(self):
         """
@@ -117,31 +110,17 @@ class VectorClient:
         """
         try:
             logger.info("ChromaDB Cloud 연결 시도...")
-            
-            # CloudClient를 사용하여 연결 (공식 가이드 방식)
             self.client = chromadb.CloudClient(
                 api_key=self.settings.CHROMA_API_KEY,
                 tenant=self.settings.CHROMA_TENANT,
-                database=self.settings.CHROMA_DATABASE
+                database=self.settings.CHROMA_DATABASE,
             )
-            
-            # 컬렉션 가져오기
-            # 컬렉션이 존재하지 않으면 예외 발생 (사전에 팀원이 생성해둬야 함)
             self.collection = self.client.get_collection(
                 name=self.settings.CHROMA_COLLECTION_NAME
             )
-            
-            # 연결 성공 로그
-            logger.info(f"✅ ChromaDB 연결 성공! Collection: {self.collection.name}")
-            logger.info(f"   데이터 개수: {self.collection.count()}")
-            
+            logger.info(f"✅ ChromaDB 연결 성공: {self.collection.name} ({self.collection.count()}개)")
         except Exception as e:
-            # 연결 실패 시 상세 에러 로그
             logger.error(f"❌ ChromaDB 연결 실패: {e}")
-            logger.error("   연결 정보를 확인하세요:")
-            logger.error(f"   - CHROMA_API_KEY: {'설정됨' if self.settings.CHROMA_API_KEY else '없음'}")
-            logger.error(f"   - CHROMA_TENANT: {self.settings.CHROMA_TENANT}")
-            logger.error(f"   - CHROMA_DATABASE: {self.settings.CHROMA_DATABASE}")
             raise
     
     def _load_embedding_model(self):
