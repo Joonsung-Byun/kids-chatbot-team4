@@ -20,15 +20,23 @@ const ChatPage: React.FC = () => {
   setMessage(prompt);
 };
 
+
 const handleSend = async (userMessage: string) => {
-  // 전송하는 순간에만 started true로 바뀜
   if (!started) setStarted(true);
 
   const userMsg: Message = { role: "user", content: userMessage, type: "text" };
   addMessage(userMsg);
 
-  const res = await mockChatAPI(userMessage);
-  addMessage(res);
+  // 여기를 수정! ↓
+  // const res = await mockChatAPI(userMessage);  ← 이 줄을 아래로 교체
+  const res = await fetch('http://localhost:3001/chat/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: userMessage })
+  });
+  const data = await res.json();
+  
+  addMessage(data);  // res → data로 변경
 };
 
 window.addEventListener("beforeunload", () => {
