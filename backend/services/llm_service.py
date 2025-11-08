@@ -1,105 +1,135 @@
+# services/llm_service.py
 """
-LLM Service - 로컬 모델 기반
+LLM Service
 
-로컬/GPU 환경에서 직접 모델 로딩
+- GPU 환경: 실제 모델 로딩 및 추론
+- CPU/Mock 환경: 간단한 Mock 답변 반환
 """
 
+import os
 from typing import List, Dict, Any
+
 from utils.config import get_settings
 from utils.logger import logger
-import os
+
+# GPU 전용 라이브러리 import 시도
+try:
+    import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
+except ImportError:
+    torch = None
+    AutoTokenizer = None
+    AutoModelForCausalLM = None
+    GenerationConfig = None
 
 
 class LLMService:
-    """LLM 기반 답변 생성 서비스 (로컬 모델)"""
-    
-    def __init__(self):
+    """LLM 기반 답변 생성 서비스"""
+
+    def __init__(self) -> None:
         self.settings = get_settings()
-        self._llm_model = None
         self._tokenizer = None
-        self._is_gpu_environment = self._detect_gpu_environment()
-        
-        if self._is_gpu_environment:
-            self._load_llm_model()
-    
-    def _detect_gpu_environment(self) -> bool:
-        """GPU 환경 감지"""
+        self._model = None
+        self._use_gpu = self._detect_gpu()
+
+        if self._use_gpu:
+            self._load_model()
+        else:
+            logger.info("🔄 GPU 미검출 또는 라이브러리 미설치 → Mock 모드로 동작")
+
+    def _detect_gpu(self) -> bool:
+        """GPU 환경 감지 (Colab, CUDA 등)"""
+        if os.getenv("COLAB_RELEASE_TAG"):
+            return True
+        if AutoModelForCausalLM and torch and torch.cuda.is_available():
+            return True
+        return False
+
+    def _load_model(self) -> None:
+        """GPU 환경에서 실제 LLM 모델 및 토크나이저 로드"""
         try:
-            if 'COLAB_RELEASE_TAG' in os.environ:
-                return True
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-    
-    def _load_llm_model(self):
-        """LLM 모델 로드 (GPU 환경에서만)"""
-        try:
-            # TODO: 코랩/RunPod에서 구현 예정
-            # from transformers import AutoTokenizer, AutoModelForCausalLM
-            # 
-            # self._tokenizer = AutoTokenizer.from_pretrained(self.settings.GENERATION_MODEL)
-            # self._llm_model = AutoModelForCausalLM.from_pretrained(
-            #     self.settings.GENERATION_MODEL,
-            #     device_map="auto",
-            #     torch_dtype=torch.float16
-            # )
-            
-            logger.info("🔄 LLM 모델 로딩 준비됨 (코랩에서 구현 예정)")
-            
+            model_name = self.settings.GENERATION_MODEL
+            logger.info(f"🔄 LLM 모델 로딩: {model_name}")
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True
+            )
+            self._model.eval()
+            logger.info("✅ LLM 모델 로드 완료")
         except Exception as e:
-            logger.error(f"LLM 모델 로딩 실패: {e}")
+            logger.error(f"❌ LLM 모델 로드 실패: {e}")
+            self._use_gpu = False  # fallback to Mock
+
+    def generate_answer(
+        self,
+        query: str,
+        context_docs: List[Dict[str, Any]],
+    ) -> str:
+        """
+        RAG 컨텍스트 기반 답변 생성
     
-    def generate_answer(self, query: str, context_docs: List[Dict[str, Any]]) -> str:
-        """RAG 컨텍스트 기반 답변 생성"""
-        try:
-            if not self._is_gpu_environment:
-                # Mock 답변 (로컬 개발용)
-                return self._generate_mock_answer(query, context_docs)
-            
-            # TODO: GPU 환경에서 실제 LLM 추론
-            # 코랩/RunPod에서 구현 예정
-            logger.info(f"🤖 LLM 답변 생성 (구현 예정): '{query}'")
-            return "GPU 환경에서 LLM 답변 생성 구현 예정입니다."
-            
-        except Exception as e:
-            logger.error(f"답변 생성 실패: {e}")
-            return "죄송합니다. 답변 생성 중 오류가 발생했습니다."
-    
-    def _generate_mock_answer(self, query: str, context_docs: List[Dict[str, Any]]) -> str:
-        """Mock 답변 생성 (로컬 개발용)"""
+        Returns:
+          - 실제 GPU 환경: 모델 추론 결과
+          - Mock 환경: 간단한 추천 리스트
+        """
+        if self._use_gpu and self._model and self._tokenizer:
+            try:
+                # 1) Prompt 조합
+                context = "\n".join(doc["content"] for doc in context_docs)
+                prompt = f"Context:\n{context}\n\nQuestion: {query}\nAnswer:"
+                # 2) 토크나이즈 및 Tensor 변환
+                inputs = self._tokenizer(
+                    prompt, return_tensors="pt", truncation=True, max_length=1024
+                ).to(self._model.device)
+                # 3) 생성 설정
+                gen_cfg = GenerationConfig(temperature=0.7, max_new_tokens=256, top_p=0.9)
+                # 4) 추론
+                with torch.no_grad():
+                    out = self._model.generate(**inputs, generation_config=gen_cfg)
+                text = self._tokenizer.decode(out[0], skip_special_tokens=True)
+                return text.split("Answer:")[-1].strip()
+            except Exception as e:
+                logger.error(f"❌ LLM 추론 중 오류: {e}")
+                return self._mock_answer(query, context_docs)
+        # Mock 모드
+        return self._mock_answer(query, context_docs)
+
+    def _mock_answer(
+        self,
+        query: str,
+        context_docs: List[Dict[str, Any]],
+    ) -> str:
+        """개발용 Mock 답변 생성"""
         if not context_docs:
-            return "관련 정보를 찾지 못했습니다. 다른 키워드로 검색해보세요."
-        
-        # 간단한 템플릿 기반 답변
-        facilities = [doc['metadata'].get('facility_name', 'Unknown') for doc in context_docs[:3]]
-        
-        return f"""
-{query}에 대한 추천 결과입니다:
+            return "관련 정보를 찾지 못했습니다. 다른 키워드로 검색해 보세요."
+        facilities = [
+            doc["metadata"].get("facility_name", "Unknown") for doc in context_docs[:3]
+        ]
+        items = "\n".join(f"• {name}" for name in facilities)
+        return (
+            f"{query}에 대한 추천 결과입니다:\n"
+            f"{items}\n"
+            f"(총 {len(context_docs)}개, 현재 Mock 모드)"
+        )
 
-🎯 추천 시설:
-{chr(10).join([f"• {facility}" for facility in facilities])}
-
-총 {len(context_docs)}개의 관련 시설을 찾았습니다.
-더 자세한 정보는 각 시설에 직접 문의해보세요!
-
-(참고: 현재 Mock 답변입니다. GPU 환경에서 고품질 답변이 생성됩니다.)
-        """.strip()
-    
-    def generate_clarifying_question(self, query: str, missing_info: List[str]) -> str:
-        """역질문 생성"""
+    def generate_clarifying_question(
+        self, query: str, missing_info: List[str]
+    ) -> str:
+        """
+        사용자가 빠뜨린 정보에 대한 추가 질문 생성
+        """
         if not missing_info:
             return "더 구체적인 정보를 알려주시면 더 정확한 추천을 드릴 수 있어요!"
-        
-        return f"더 정확한 추천을 위해 {', '.join(missing_info)}에 대해 알려주세요."
+        return f"추가로 {', '.join(missing_info)} 정보를 알려주실 수 있나요?"
 
 
-# 싱글톤 인스턴스  
-_llm_service_instance = None
+# 싱글톤 인스턴스
+_llm_service: LLMService = None
+
 
 def get_llm_service() -> LLMService:
-    """LLM Service 싱글톤 반환"""
-    global _llm_service_instance
-    if _llm_service_instance is None:
-        _llm_service_instance = LLMService()
-    return _llm_service_instance
+    """LLMService 싱글톤 반환"""
+    global _llm_service
+    if _llm_service is None:
+        _llm_service = LLMService()
+    return _llm_service
