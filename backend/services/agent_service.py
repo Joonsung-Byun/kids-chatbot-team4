@@ -2,13 +2,17 @@
 LangChain Agent Service (LangChain 1.0+ with LangGraph)
 
 LangGraph의 create_react_agent를 사용한 도구 자동 선택 및 실행
+langgraph 1.0.2 버전 호환 + MockChatModel Runnable 구현
 """
 
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterator
 
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.runnables import Runnable
+from langchain_core.language_models import BaseChatModel
+from langchain_core.outputs import ChatResult, ChatGeneration
 
 from services.llm_service import get_llm_service
 from services.rag_service import get_rag_service
@@ -81,34 +85,56 @@ def get_tools():
 
 
 # ============================================================
-# Mock LLM (CPU 환경용)
+# Mock LLM (CPU 환경용) - Runnable 구현
 # ============================================================
 
-class MockChatModel:
-    """CPU 환경에서 사용할 간단한 Mock ChatModel"""
+class MockChatModel(BaseChatModel):
+    """
+    LangGraph 호환 Mock ChatModel
+    BaseChatModel을 상속하여 Runnable 인터페이스 구현
+    """
     
-    def __init__(self):
-        self.model = "mock-chat-model"
+    model_name: str = "mock-chat-model"
     
-    def invoke(self, messages):
-        """간단한 룰베이스 응답"""
-        if isinstance(messages, list) and messages:
-            last_msg = messages[-1]
-            user_input = getattr(last_msg, "content", str(last_msg))
-        else:
-            user_input = str(messages)
+    def _generate(self, messages: List[BaseMessage], stop=None, **kwargs) -> ChatResult:
+        """필수 메서드: 메시지 생성"""
+        # 마지막 사용자 메시지 추출
+        user_input = ""
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                user_input = msg.content
+                break
         
+        # 룰 베이스 응답
         if any(k in user_input for k in ["지역", "어디", "위치"]):
-            response = "어느 지역을 생각하고 계신가요? 🗺️ (서울, 부산, 대구 등)"
+            response_text = "어느 지역을 생각하고 계신가요? 🗺️ (서울, 부산, 대구 등)"
         elif any(k in user_input for k in ["고마워", "감사", "좋아"]):
-            response = "천만에요! 😊 더 도움이 필요하시면 언제든 말씀해주세요!"
+            response_text = "천만에요! 😊 더 도움이 필요하시면 언제든 말씀해주세요!"
         else:
-            response = "Mock 모드입니다. 실제 LLM을 사용하려면 OpenAI API 키를 설정하거나 GPU 환경에서 실행해주세요."
+            response_text = "Mock 모드입니다. 실제 LLM을 사용하려면 OpenAI API 키를 설정하거나 GPU 환경에서 실행해주세요."
         
-        return AIMessage(content=response)
+        # ChatResult 반환
+        message = AIMessage(content=response_text)
+        generation = ChatGeneration(message=message)
+        return ChatResult(generations=[generation])
     
-    def bind_tools(self, tools):
+    @property
+    def _llm_type(self) -> str:
+        """필수 속성: LLM 타입"""
+        return "mock-chat-model"
+    
+    def bind_tools(self, tools, **kwargs):
+        """도구 바인딩 (Mock에서는 self 반환)"""
         return self
+    
+    def _stream(self, messages: List[BaseMessage], stop=None, **kwargs) -> Iterator[ChatResult]:
+        """선택 메서드: 스트리밍 (미구현)"""
+        result = self._generate(messages, stop=stop, **kwargs)
+        yield result
+    
+    async def _agenerate(self, messages: List[BaseMessage], stop=None, **kwargs) -> ChatResult:
+        """선택 메서드: 비동기 생성 (동기 버전 재사용)"""
+        return self._generate(messages, stop=stop, **kwargs)
 
 
 # ============================================================
@@ -127,7 +153,7 @@ def create_langchain_agent():
     
     tools = get_tools()
     
-    # ✅ 현재 버전(1.0.2)은 system_message 인자 사용
+    # System prompt 정의
     system_prompt = """당신은 아이와 함께할 수 있는 활동을 추천하는 전문 챗봇입니다.
 
 **중요 규칙:**
@@ -154,7 +180,17 @@ def create_langchain_agent():
     # LLM 로드
     llm_service = get_llm_service()
     
-    if llm_service._use_gpu and llm_service._model:
+    # OpenAI API 키가 있으면 OpenAI 사용
+    import os
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+            logger.info("✅ OpenAI LLM 사용")
+        except ImportError:
+            logger.warning("⚠️ langchain-openai 미설치 → Mock 모드")
+            llm = MockChatModel()
+    elif llm_service._use_gpu and llm_service._model:
         try:
             from langchain_huggingface import HuggingFacePipeline
             llm = HuggingFacePipeline(
@@ -163,22 +199,36 @@ def create_langchain_agent():
             )
             logger.info("✅ GPU 모드: HuggingFace LLM 사용")
         except ImportError:
-            logger.warning("⚠️ langchain-huggingface 미설치 → Mock 모드 전환")
+            logger.warning("⚠️ langchain-huggingface 미설치 → Mock 모드")
             llm = MockChatModel()
     else:
         logger.info("✅ CPU 모드: Mock LLM 사용")
         llm = MockChatModel()
     
+    # ============================================================
+    # langgraph 버전별 호환성 처리
+    # ============================================================
+    
+    # langgraph 1.0.2는 파라미터가 거의 없음!
+    # 공식 문서: create_react_agent(model, tools, checkpointer=None)
+    
     try:
+        logger.info("🔧 Agent 생성 시작...")
+        
+        # ✅ 기본 방법 (langgraph 1.0.2)
         agent = create_react_agent(
             model=llm,
-            tools=tools,
-            system_prompt=system_prompt
+            tools=tools
         )
+        
         logger.info("✅ LangGraph ReAct Agent 생성 완료")
+        logger.warning("⚠️ System prompt는 messages에 직접 추가해야 합니다")
         return agent
+        
     except Exception as e:
         logger.error(f"❌ Agent 생성 실패: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -198,7 +248,7 @@ def convert_history_to_messages(history: List[Dict[str, str]]) -> List:
 
 
 # ============================================================
-# Agent 실행
+# Agent 실행 (System Prompt 포함)
 # ============================================================
 
 def run_agent(user_query: str, conversation_id: str, conversation_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -214,8 +264,23 @@ def run_agent(user_query: str, conversation_id: str, conversation_history: List[
             "tools_used": []
         }
     
+    # System prompt를 첫 메시지로 추가
+    from langchain_core.messages import SystemMessage
+    
+    system_prompt = """당신은 아이와 함께할 수 있는 활동을 추천하는 전문 챗봇입니다.
+
+**중요 규칙:**
+1. 위치 확인이 최우선입니다
+2. 위치가 확인되면 weather_tool과 rag_search_tool 사용
+3. 감정 표현은 도구 없이 바로 응답
+
+사용 가능한 도구를 활용하여 최선의 답변을 제공하세요."""
+    
+    # 메시지 구성
     chat_history = convert_history_to_messages(conversation_history or [])
-    all_messages = chat_history + [HumanMessage(content=user_query)]
+    
+    # System prompt를 맨 앞에 추가
+    all_messages = [SystemMessage(content=system_prompt)] + chat_history + [HumanMessage(content=user_query)]
     
     try:
         result = agent.invoke({"messages": all_messages})
@@ -223,16 +288,21 @@ def run_agent(user_query: str, conversation_id: str, conversation_history: List[
         tools_used = []
         
         if "messages" in result:
+            # 마지막 AI 메시지 찾기
             for msg in reversed(result["messages"]):
-                if isinstance(msg, AIMessage):
+                if isinstance(msg, AIMessage) and msg.content:
                     answer = msg.content
                     break
+            
+            # 사용된 도구 추출
             for msg in result["messages"]:
-                if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-                    tools_used.extend(t["name"] for t in msg.tool_calls if isinstance(t, dict) and "name" in t)
+                if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        if isinstance(tool_call, dict) and "name" in tool_call:
+                            tools_used.append(tool_call["name"])
         
         if not answer:
-            answer = "응답 생성 실패"
+            answer = "응답을 생성할 수 없습니다."
         
         new_history = (conversation_history or []) + [
             {"role": "user", "content": user_query},
@@ -240,7 +310,11 @@ def run_agent(user_query: str, conversation_id: str, conversation_history: List[
         ]
         
         logger.info(f"✅ Agent 완료 (사용된 도구: {list(set(tools_used))})")
-        return {"answer": answer, "conversation_history": new_history, "tools_used": list(set(tools_used))}
+        return {
+            "answer": answer,
+            "conversation_history": new_history,
+            "tools_used": list(set(tools_used))
+        }
     
     except Exception as e:
         logger.error(f"❌ Agent 실행 오류: {e}", exc_info=True)
@@ -249,4 +323,8 @@ def run_agent(user_query: str, conversation_id: str, conversation_history: List[
             {"role": "user", "content": user_query},
             {"role": "ai", "content": fallback_answer},
         ]
-        return {"answer": fallback_answer, "conversation_history": new_history, "tools_used": []}
+        return {
+            "answer": fallback_answer,
+            "conversation_history": new_history,
+            "tools_used": []
+        }
