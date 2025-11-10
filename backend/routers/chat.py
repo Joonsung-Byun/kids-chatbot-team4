@@ -1,14 +1,17 @@
 # routers/chat.py
 """
-Chat Router - LangGraph Agent 역할
+Chat Router - LangChain Agent 통합
 """
 
+import uuid
 from fastapi import APIRouter
-from typing import List, Dict, Any, Optional
 
-from models.chat_schema import ChatRequest, ChatResponse, MapData, MapMarker
-from services.rag_service import get_rag_service
-from services.llm_service import get_llm_service
+from models.chat_schema import ChatRequest, ChatResponse
+from services.agent_service import run_agent
+from utils.session_manager import (
+    get_history,
+    save_history
+)
 from utils.logger import logger
 
 router = APIRouter(
@@ -20,101 +23,93 @@ router = APIRouter(
 @router.post(
     "/message",
     response_model=ChatResponse,
-    summary="챗봇 메시지 처리",
-    description="사용자 메시지를 받아 RAG 검색 → LLM 답변 생성 → (필요 시) 지도 데이터 포함 응답"
+    summary="챗봇 메시지 처리 (LangChain Agent)",
+    description="LangChain Agent로 자동 도구 선택 및 실행"
 )
 async def chat_message(request: ChatRequest) -> ChatResponse:
     """
     메인 챗봇 엔드포인트
-
-    1. RAG 검색  
-    2. LLM 답변 생성  
-    3. 검색 결과 중 좌표가 있으면 MapData 생성  
-    4. ChatResponse 반환
+    
+    1. conversation_id 확인
+    2. 세션 히스토리 로드
+    3. Agent 실행
+    4. 히스토리 저장
+    5. 응답 반환
     """
     try:
+        # 1. conversation_id 처리
+        conversation_id = request.conversation_id
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+            logger.info(f"🆕 새 대화 생성: {conversation_id}")
+        else:
+            logger.info(f"📖 기존 대화 계속: {conversation_id}")
+        
+        # 2. 히스토리 로드
+        conversation_history = get_history(conversation_id)
+        
+        # 3. Agent 실행
         logger.info(f"💬 사용자 메시지: '{request.message}'")
-
-        # 1) RAG 검색
-        rag_service = get_rag_service()
-        search_results = rag_service.search_and_rerank(request.message)
-
-        # 2) LLM 답변 생성
-        llm_service = get_llm_service()
-        answer = llm_service.generate_answer(request.message, search_results)
-
-        # 3) 지도 데이터 생성 (있으면)
-
-        # TODO: 카카오맵 API 연동 후 아래 로직을 활성화하세요.
-        # raw_map = get_map_markers(request.message)
-        # map_data = MapData(**raw_map)
-        # return ChatResponse(
-        #     role="ai",
-        #     content=answer,
-        #     type="map",
-        #     data=map_data
-        # )
-
-
-        # 일반 텍스트 응답
+        
+        result = run_agent(
+            user_query=request.message,
+            conversation_id=conversation_id,
+            conversation_history=conversation_history
+        )
+        
+        # 4. 히스토리 저장
+        save_history(conversation_id, result["conversation_history"])
+        
+        logger.info(f"✅ 응답 생성 완료")
+        
+        # 5. 응답 반환
         return ChatResponse(
             role="ai",
-            content=answer,
-            type="text"
+            content=result["answer"],
+            type="text",
+            conversation_id=conversation_id
         )
-
+    
     except Exception as e:
-        logger.error(f"챗봇 처리 중 오류 발생: {e}")
-        # 에러 발생 시에도 ChatResponse 포맷 유지
+        logger.error(f"❌ 챗봇 처리 중 오류: {e}", exc_info=True)
+        
+        # 에러 시에도 conversation_id 반환
+        error_conversation_id = request.conversation_id or str(uuid.uuid4())
+        
         return ChatResponse(
             role="ai",
-            content="죄송합니다. 일시적인 오류가 발생했습니다.",
-            type="text"
+            content="죄송합니다. 일시적인 오류가 발생했습니다. 다시 시도해주세요.",
+            type="text",
+            conversation_id=error_conversation_id
         )
 
-'''
-------------------------------------------------------------
-아래 함수는 카카오맵 연동 전에 사용하던 임시 MapData 생성 로직입니다.
-실제 API 연동 시에는 이 전체 블록을 활성화하거나 완전히 제거하세요.
-------------------------------------------------------------
 
-def _create_map_data_if_needed(
-    search_results: List[Dict[str, Any]]
-) -> Optional[MapData]:
-    """
-    검색 결과(metadata)에서 위도·경도 정보가 있으면 MapData 생성
+@router.delete(
+    "/history/{conversation_id}",
+    summary="대화 히스토리 삭제"
+)
+async def clear_conversation(conversation_id: str):
+    """대화 히스토리 삭제"""
+    from utils.session_manager import clear_history
+    
+    clear_history(conversation_id)
+    
+    return {
+        "status": "success",
+        "message": f"Conversation {conversation_id} cleared"
+    }
 
-    - 최대 5개 문서 검사
-    - 평균 좌표를 중심으로 MapData 구성
-    """
-    if not search_results:
-        return None
 
-    locations = []
-    for doc in search_results[:5]:
-        meta = doc.get("metadata", {})
-        lat = meta.get("latitude")
-        lng = meta.get("longitude")
-        name = meta.get("facility_name")
-
-        if lat is None or lng is None or not name:
-            continue
-
-        try:
-            locations.append({
-                "name": str(name),
-                "lat": float(lat),
-                "lng": float(lng),
-                "desc": f"{meta.get('category1','')} - {meta.get('category2','')}"
-            })
-        except (ValueError, TypeError):
-            continue
-
-    center_lat = sum(loc["lat"] for loc in locations) / len(locations)
-    center_lng = sum(loc["lng"] for loc in locations) / len(locations)
-
-    markers = [MapMarker(**loc) for loc in locations]
-
-    return MapData(center={"lat": center_lat, "lng": center_lng}, markers=markers)
-
-'''
+@router.get(
+    "/sessions/count",
+    summary="활성 세션 수"
+)
+async def get_session_count():
+    """활성 세션 개수 조회"""
+    from utils.session_manager import get_session_count
+    
+    count = get_session_count()
+    
+    return {
+        "active_sessions": count
+    }

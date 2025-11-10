@@ -6,7 +6,7 @@ RAG Service
 - 크로스인코더 리랭킹
 - MMR 다양성 필터링
 """
-
+import os
 from typing import List, Dict, Any, Optional
 
 from utils.config import get_settings
