@@ -330,7 +330,7 @@ class VectorClient:
             seed = int(hash_obj.hexdigest(), 16) % (2**32)
             
             np.random.seed(seed)
-            fake_embedding = np.random.normal(0, 1, 3584)  # 4096 → 3584로 변경!
+            fake_embedding = np.random.normal(0, 1, 3584)  # 3584 차원 (실제 우리 임베딩 모델의 차원과 일치시킴)
             
             norm = np.linalg.norm(fake_embedding)
             if norm > 0:

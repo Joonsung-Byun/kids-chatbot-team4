@@ -2,8 +2,12 @@
 """Pydantic 스키마 정의 - 프론트엔드 Message 타입과 호환"""
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TypedDict
 
+
+# ============================================================
+# 기존 Pydantic 스키마 (FastAPI용)
+# ============================================================
 
 class MapMarker(BaseModel):
     """지도 마커 하나를 나타내는 모델"""
@@ -25,9 +29,9 @@ class ChatRequest(BaseModel):
         ..., 
         description="사용자가 입력한 메시지"
     )
-    session_id: Optional[str] = Field(
+    conversation_id: Optional[str] = Field(
         None, 
-        description="대화 세션 ID (선택)"
+        description="대화 세션 ID (UUID)"
     )
 
 
@@ -49,3 +53,39 @@ class ChatResponse(BaseModel):
         None, 
         description="지도 데이터 (type='map'일 때 포함)"
     )
+    conversation_id: Optional[str] = Field(
+        None,
+        description="대화 세션 ID (클라이언트에 반환)"
+    )
+
+
+# ============================================================
+# LangGraph용 TypedDict 스키마
+# ============================================================
+
+class ChatState(TypedDict):
+    """
+    LangGraph Agent 상태 관리
+    
+    이 상태는 Agent의 모든 노드(Node)에서 공유되며,
+    각 노드는 이 상태를 읽고 수정합니다.
+    """
+    # 대화 관리
+    messages: List[Dict[str, str]]    # [{"role": "user", "content": "..."}, ...]
+    conversation_id: str              # UUID
+    user_query: str                   # 현재 사용자 입력
+    
+    # 추출된 정보
+    location: Optional[str]           # 지역명 (예: "서울", "강남", "부산")
+    date: Optional[str]               # 날짜 (예: "오늘", "내일", "2024-01-01")
+    
+    # Tool 선택 및 실행 결과
+    selected_tools: List[str]         # 선택된 도구 목록 (예: ["weather", "rag"])
+    needs_location: bool              # 위치 정보 필요 여부
+    
+    weather_results: Optional[Dict[str, Any]]  # 날씨 API 결과
+    rag_results: Optional[List[Dict[str, Any]]]  # RAG 검색 결과
+    map_results: Optional[Dict[str, Any]]      # 지도 정보
+    
+    # 최종 응답
+    final_answer: str                 # LLM이 생성한 최종 답변
