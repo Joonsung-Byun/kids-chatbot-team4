@@ -42,10 +42,20 @@ const handleSend = async (userMessage: string) => {
 window.addEventListener("beforeunload", () => {
   localStorage.removeItem("chatMessages");
 });
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-10">
 
   <div className="w-full max-w-4xl">
+          {
+        started ? 
+          <div className="flex justify-center items-center gap-5 mb-3">
+            <img src="logo2_copy.webp" alt="" className="w-36 md:w-52 h-auto block"/>
+            <h1 className="text-xl font-bold" >키즈 액티비티 가이드🍃</h1>
+          </div>
+        :
+         null
+      }
     {/* ① Hero 화면 */}
     <div
       className={`transition-all duration-500 ease-in-out ${
@@ -82,13 +92,17 @@ window.addEventListener("beforeunload", () => {
     </div>
 
     {/* ② Chat 화면 */}
+
     <div
       className={`transition-all duration-500 ease-in-out ${
         started
           ? "opacity-100 translate-y-0"
           : "opacity-0 translate-y-3 pointer-events-none h-0 overflow-hidden"
       }`}
-    >
+    >    
+    {/* <div>
+      <h1>AIGO 키즈 챗봇</h1>
+    </div> */}
       {started && (
         <>
           <div className="mb-4 min-w-0">
