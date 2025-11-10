@@ -34,6 +34,7 @@ router = APIRouter(
     summary="챗봇 메시지 처리 (LangGraph Agent)",
     description="LangGraph Agent로 멀티턴 대화 처리. conversation_id로 세션 관리."
 )
+
 async def chat_message(request: ChatRequest) -> ChatResponse:
     """
     메인 챗봇 엔드포인트 (LangGraph Agent 사용)
