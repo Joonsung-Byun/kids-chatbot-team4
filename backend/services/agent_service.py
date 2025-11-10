@@ -1,18 +1,15 @@
-# services/agent_service.py
 """
-LangGraph Agent Service
+LangChain Agent Service (LangChain 1.0+ with LangGraph)
 
-LangGraph를 사용한 멀티턴 대화 관리
-- Supervisor: 룰베이스로 도구 선택
-- Tools: Weather, RAG, Map
-- Answer Generation: Qwen2.5-7B-Instruct
+LangGraph의 create_react_agent를 사용한 도구 자동 선택 및 실행
 """
 
-from typing import Literal
-from langgraph.graph import StateGraph, END
+import json
+from typing import List, Dict, Any
 
-from models.chat_schema import ChatState
-from services.supervisor_service import get_supervisor_service
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, AIMessage
+
 from services.llm_service import get_llm_service
 from services.rag_service import get_rag_service
 from services.weather_service import get_weather
@@ -21,405 +18,235 @@ from utils.logger import logger
 
 
 # ============================================================
-# LangGraph Nodes
+# Tool 정의 (LangGraph 방식)
 # ============================================================
 
-def supervisor_node(state: ChatState) -> ChatState:
-    """
-    Supervisor Node: 쿼리 분석 및 도구 선택
-    
-    룰베이스로 다음을 수행:
-    - 위치 추출
-    - 날짜 추출
-    - 필요한 도구 선택 (weather, rag, map)
-    - 위치 없으면 needs_location=True
-    """
-    logger.info(f"[Supervisor] 분석 시작: '{state['user_query']}'")
-    
-    # 이전 대화에서 위치 정보 가져오기
-    current_location = state.get("location")
-    
-    # 대화 컨텍스트 (최근 5개 메시지)
-    conversation_context = state["messages"][-5:] if state["messages"] else []
-    
-    # Supervisor 분석
-    supervisor = get_supervisor_service()
-    result = supervisor.analyze_query(
-        user_query=state["user_query"],
-        conversation_context=conversation_context,
-        current_location=current_location
-    )
-    
-    # 상태 업데이트
-    state["location"] = result.get("location")
-    state["date"] = result.get("date")
-    state["selected_tools"] = result.get("selected_tools", [])
-    state["needs_location"] = result.get("needs_location", False)
-    
-    logger.info(f"[Supervisor] 결과: location={state['location']}, tools={state['selected_tools']}, needs_location={state['needs_location']}")
-    
-    return state
-
-
-def check_location_node(state: ChatState) -> ChatState:
-    """
-    위치 확인 Node
-    
-    위치가 필요한데 없으면 역질문 생성
-    """
-    if state["needs_location"]:
-        state["final_answer"] = "어느 지역을 생각하고 계신가요? 🗺️"
-        logger.info("[CheckLocation] 위치 질문 생성")
-    
-    return state
-
-
-def weather_tool_node(state: ChatState) -> ChatState:
-    """
-    Weather Tool Node
-    
-    날씨 API 호출 (선택된 경우에만)
-    """
-    if "weather" not in state["selected_tools"]:
-        return state
-    
+@tool
+def weather_tool(location: str) -> str:
+    """날씨 정보를 조회합니다. 입력: 지역명 (예: '서울', '강남')"""
     try:
-        logger.info(f"[WeatherTool] 날씨 조회: {state['location']}")
-        
-        weather_info = get_weather(
-            location=state["location"],
-            target_date=state.get("date")
-        )
-        
-        state["weather_results"] = weather_info
-        logger.info(f"[WeatherTool] 결과: {weather_info}")
-        
+        logger.info(f"[WeatherTool] 호출: {location}")
+        result = get_weather(location=location, target_date=None)
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         logger.error(f"[WeatherTool] 오류: {e}")
-        state["weather_results"] = None
-    
-    return state
+        return json.dumps({"error": str(e)})
 
 
-def rag_tool_node(state: ChatState) -> ChatState:
-    """
-    RAG Tool Node
-    
-    벡터 검색으로 시설 찾기
-    """
-    if "rag" not in state["selected_tools"]:
-        return state
-    
+@tool
+def rag_search_tool(query: str) -> str:
+    """문화/체육/교육 시설을 검색합니다. 입력: 검색 쿼리 (예: '서울 놀이터', '강남 키즈카페')"""
     try:
-        logger.info(f"[RAGTool] 검색: {state['user_query']}")
-        
-        # 메타데이터 필터 구성
-        filters = {}
-        if state.get("location"):
-            # 위치 기반 필터링 (필요시 추가)
-            pass
-        
-        # RAG 검색
+        logger.info(f"[RAGTool] 호출: {query}")
         rag_service = get_rag_service()
-        results = rag_service.search_and_rerank(
-            query=state["user_query"],
-            top_k=5,
-            filters=filters or None
-        )
+        results = rag_service.search_and_rerank(query=query, top_k=5)
         
-        state["rag_results"] = results
-        logger.info(f"[RAGTool] 결과: {len(results)}개 시설")
-        
+        formatted = []
+        for doc in results[:3]:
+            metadata = doc.get("metadata", {})
+            formatted.append({
+                "name": metadata.get("facility_name", "Unknown"),
+                "category": metadata.get("category1", "시설"),
+                "location": metadata.get("region_gu", ""),
+                "price": metadata.get("price", "무료")
+            })
+        return json.dumps(formatted, ensure_ascii=False)
     except Exception as e:
         logger.error(f"[RAGTool] 오류: {e}")
-        state["rag_results"] = []
-    
-    return state
+        return json.dumps({"error": str(e)})
 
 
-def map_tool_node(state: ChatState) -> ChatState:
-    """
-    Map Tool Node
-    
-    카카오맵 데이터 생성 (RAG 결과 기반)
-    """
-    if "map" not in state["selected_tools"]:
-        return state
-    
+@tool
+def map_tool(query: str) -> str:
+    """지도를 생성합니다. 입력: 시설 정보"""
     try:
-        # RAG 결과에서 좌표 추출
-        facilities = state.get("rag_results", [])
-        
-        if not facilities:
-            logger.warning("[MapTool] RAG 결과 없음 - 지도 생성 스킵")
-            return state
-        
-        logger.info(f"[MapTool] 지도 생성: {len(facilities)}개 시설")
-        
-        # TODO: 실제 카카오맵 API 연동 시 사용
-        # map_data = get_map_markers(state["user_query"])
-        # state["map_results"] = map_data
-        
-        # 임시: RAG 결과를 지도 형식으로 변환
-        state["map_results"] = {
-            "center": {"lat": 37.5665, "lng": 126.9780},  # 서울 기본
-            "markers": [
-                {
-                    "name": f["metadata"].get("facility_name", "Unknown"),
-                    "lat": 37.5665 + i * 0.01,  # Mock 좌표
-                    "lng": 126.9780 + i * 0.01
-                }
-                for i, f in enumerate(facilities[:5])
-            ]
-        }
-        
+        logger.info(f"[MapTool] 호출: {query}")
+        # TODO: 실제 카카오맵 API 연동
+        return json.dumps({
+            "status": "success",
+            "message": "지도 생성 완료 (Mock)"
+        }, ensure_ascii=False)
     except Exception as e:
         logger.error(f"[MapTool] 오류: {e}")
-        state["map_results"] = None
-    
-    return state
-
-
-def generate_answer_node(state: ChatState) -> ChatState:
-    """
-    Answer Generation Node
-    
-    Qwen2.5-7B-Instruct로 최종 답변 생성
-    """
-    # 1. 위치 질문이 이미 생성된 경우
-    if state.get("final_answer"):
-        logger.info("[GenerateAnswer] 위치 질문 사용")
-        return state
-    
-    # 2. 도구 없음 (일반 대화)
-    if not state["selected_tools"]:
-        logger.info("[GenerateAnswer] 일반 대화 응답")
-        llm_service = get_llm_service()
-        
-        # 간단한 Mock 응답 (GPU 환경에서는 실제 LLM 사용)
-        state["final_answer"] = llm_service._mock_answer(
-            state["user_query"],
-            []
-        )
-        return state
-    
-    # 3. Tool 결과 기반 응답 생성
-    try:
-        logger.info("[GenerateAnswer] Tool 결과 기반 응답 생성")
-        
-        llm_service = get_llm_service()
-        rag_results = state.get("rag_results", [])
-        
-        # 컨텍스트 문서 포맷 변환
-        context_docs = []
-        for doc in rag_results:
-            context_docs.append({
-                "content": doc.get("content", ""),
-                "metadata": doc.get("metadata", {})
-            })
-        
-        # LLM 답변 생성
-        answer = llm_service.generate_answer(
-            query=state["user_query"],
-            context_docs=context_docs
-        )
-        
-        # 날씨 정보 추가 (있으면)
-        if state.get("weather_results"):
-            weather = state["weather_results"]
-            answer = f"🌤️ 날씨: {weather}\n\n{answer}"
-        
-        state["final_answer"] = answer
-        logger.info(f"[GenerateAnswer] 완료: {len(answer)}자")
-        
-    except Exception as e:
-        logger.error(f"[GenerateAnswer] 오류: {e}")
-        state["final_answer"] = "죄송합니다. 응답 생성 중 오류가 발생했습니다."
-    
-    return state
+        return json.dumps({"error": str(e)})
 
 
 # ============================================================
-# Routing Functions
+# Tools 리스트
 # ============================================================
 
-def should_ask_location(state: ChatState) -> Literal["ask_location", "execute_tools"]:
-    """
-    조건부 라우팅: 위치 질문 vs 도구 실행
-    """
-    if state["needs_location"]:
-        return "ask_location"
-    return "execute_tools"
-
-
-def should_run_weather(state: ChatState) -> Literal["weather", "rag"]:
-    """
-    조건부 라우팅: 날씨 도구 실행 여부
-    """
-    if "weather" in state["selected_tools"]:
-        return "weather"
-    return "rag"
-
-
-def should_run_rag(state: ChatState) -> Literal["rag", "map"]:
-    """
-    조건부 라우팅: RAG 도구 실행 여부
-    """
-    if "rag" in state["selected_tools"]:
-        return "rag"
-    return "map"
-
-
-def should_run_map(state: ChatState) -> Literal["map", "generate"]:
-    """
-    조건부 라우팅: Map 도구 실행 여부
-    """
-    if "map" in state["selected_tools"]:
-        return "map"
-    return "generate"
+def get_tools():
+    """사용 가능한 도구 목록 반환"""
+    return [weather_tool, rag_search_tool, map_tool]
 
 
 # ============================================================
-# Graph Creation
+# Mock LLM (CPU 환경용)
 # ============================================================
 
-def create_agent_graph():
-    """
-    LangGraph Agent 생성
+class MockChatModel:
+    """CPU 환경에서 사용할 간단한 Mock ChatModel"""
     
-    워크플로우:
-    START → Supervisor → [위치 질문 OR 도구 실행] → 답변 생성 → END
-    """
+    def __init__(self):
+        self.model = "mock-chat-model"
+    
+    def invoke(self, messages):
+        """간단한 룰베이스 응답"""
+        if isinstance(messages, list) and messages:
+            last_msg = messages[-1]
+            user_input = getattr(last_msg, "content", str(last_msg))
+        else:
+            user_input = str(messages)
+        
+        if any(k in user_input for k in ["지역", "어디", "위치"]):
+            response = "어느 지역을 생각하고 계신가요? 🗺️ (서울, 부산, 대구 등)"
+        elif any(k in user_input for k in ["고마워", "감사", "좋아"]):
+            response = "천만에요! 😊 더 도움이 필요하시면 언제든 말씀해주세요!"
+        else:
+            response = "Mock 모드입니다. 실제 LLM을 사용하려면 OpenAI API 키를 설정하거나 GPU 환경에서 실행해주세요."
+        
+        return AIMessage(content=response)
+    
+    def bind_tools(self, tools):
+        return self
+
+
+# ============================================================
+# Agent 생성
+# ============================================================
+
+def create_langchain_agent():
+    """LangGraph create_react_agent를 사용한 Agent 생성"""
     logger.info("🔧 LangGraph Agent 생성 중...")
     
-    workflow = StateGraph(ChatState)
+    try:
+        from langgraph.prebuilt import create_react_agent
+    except ImportError:
+        logger.error("❌ langgraph 패키지가 설치되지 않았습니다. pip install langgraph 로 설치하세요.")
+        return None
     
-    # Nodes 추가
-    workflow.add_node("supervisor", supervisor_node)
-    workflow.add_node("check_location", check_location_node)
-    workflow.add_node("weather_tool", weather_tool_node)
-    workflow.add_node("rag_tool", rag_tool_node)
-    workflow.add_node("map_tool", map_tool_node)
-    workflow.add_node("generate_answer", generate_answer_node)
+    tools = get_tools()
     
-    # Entry point
-    workflow.set_entry_point("supervisor")
+    # ✅ 현재 버전(1.0.2)은 system_message 인자 사용
+    system_prompt = """당신은 아이와 함께할 수 있는 활동을 추천하는 전문 챗봇입니다.
+
+**중요 규칙:**
+
+1. **위치 확인이 최우선입니다:**
+   - 사용자 질문에 지역명이 없으면 먼저 "어느 지역을 생각하고 계신가요? 🗺️" 질문
+   - 이전 대화에 지역이 있으면 그것을 사용
+
+2. **위치가 확인되면 다음 순서로 진행:**
+   - Step 1: weather_tool로 날씨 확인
+   - Step 2: rag_search_tool로 추천 시설 검색
+   - Step 3: 결과를 종합해서 친절하게 답변
+
+3. **감정 표현("고마워", "좋아요" 등):**
+   - 도구 사용 없이 바로 친절하게 응답
+
+4. **답변 스타일:**
+   - 이모지 사용 (🎨, 🏃‍♂️, 📍)
+   - 구체적인 정보 제공
+   - 추가 질문 유도
+
+사용 가능한 도구를 활용하여 최선의 답변을 제공하세요."""
     
-    # 조건부 라우팅: Supervisor → 위치 질문 OR 도구 실행
-    workflow.add_conditional_edges(
-        "supervisor",
-        should_ask_location,
-        {
-            "ask_location": "check_location",
-            "execute_tools": "weather_tool"
-        }
-    )
+    # LLM 로드
+    llm_service = get_llm_service()
     
-    # 위치 질문 → 종료
-    workflow.add_edge("check_location", END)
+    if llm_service._use_gpu and llm_service._model:
+        try:
+            from langchain_huggingface import HuggingFacePipeline
+            llm = HuggingFacePipeline(
+                pipeline=llm_service._model,
+                model_kwargs={"temperature": 0.7, "max_new_tokens": 512}
+            )
+            logger.info("✅ GPU 모드: HuggingFace LLM 사용")
+        except ImportError:
+            logger.warning("⚠️ langchain-huggingface 미설치 → Mock 모드 전환")
+            llm = MockChatModel()
+    else:
+        logger.info("✅ CPU 모드: Mock LLM 사용")
+        llm = MockChatModel()
     
-    # 도구 실행 체인 (조건부)
-    workflow.add_conditional_edges(
-        "weather_tool",
-        should_run_rag,
-        {
-            "rag": "rag_tool",
-            "map": "map_tool"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "rag_tool",
-        should_run_map,
-        {
-            "map": "map_tool",
-            "generate": "generate_answer"
-        }
-    )
-    
-    workflow.add_edge("map_tool", "generate_answer")
-    workflow.add_edge("generate_answer", END)
-    
-    logger.info("✅ LangGraph Agent 생성 완료")
-    
-    return workflow.compile()
+    try:
+        agent = create_react_agent(
+            model=llm,
+            tools=tools,
+            system_prompt=system_prompt
+        )
+        logger.info("✅ LangGraph ReAct Agent 생성 완료")
+        return agent
+    except Exception as e:
+        logger.error(f"❌ Agent 생성 실패: {e}")
+        return None
 
 
 # ============================================================
-# Main Chat Function
+# 대화 히스토리 변환
 # ============================================================
 
-def run_agent(
-    user_query: str,
-    conversation_id: str,
-    conversation_history: list = None
-) -> dict:
-    """
-    Agent 실행
-    
-    Args:
-        user_query: 사용자 입력
-        conversation_id: 대화 세션 ID
-        conversation_history: 이전 대화 히스토리
-    
-    Returns:
-        {
-            "answer": str,
-            "conversation_history": list,
-            "location": str,
-            "tools_used": list
-        }
-    """
+def convert_history_to_messages(history: List[Dict[str, str]]) -> List:
+    """대화 히스토리를 LangChain Message 형식으로 변환"""
+    messages = []
+    for msg in history[-5:]:
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "ai":
+            messages.append(AIMessage(content=msg["content"]))
+    return messages
+
+
+# ============================================================
+# Agent 실행
+# ============================================================
+
+def run_agent(user_query: str, conversation_id: str, conversation_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
+    """LangGraph Agent 실행"""
     logger.info(f"🚀 Agent 실행: conversation_id={conversation_id}")
     
-    # Graph 생성
-    graph = create_agent_graph()
+    agent = create_langchain_agent()
     
-    # 초기 상태
-    initial_state = ChatState(
-        messages=conversation_history or [],
-        conversation_id=conversation_id,
-        user_query=user_query,
-        location=None,
-        date=None,
-        selected_tools=[],
-        needs_location=False,
-        weather_results=None,
-        rag_results=None,
-        map_results=None,
-        final_answer=""
-    )
+    if agent is None:
+        return {
+            "answer": "죄송합니다. Agent 시스템을 초기화할 수 없습니다. langgraph 패키지를 확인해주세요.",
+            "conversation_history": conversation_history or [],
+            "tools_used": []
+        }
     
-    # 이전 히스토리에서 위치 추출 시도
-    if conversation_history:
-        supervisor = get_supervisor_service()
-        for msg in reversed(conversation_history):
-            if msg["role"] == "user":
-                location = supervisor._extract_location(msg["content"])
-                if location:
-                    initial_state["location"] = location
-                    logger.info(f"[Agent] 히스토리에서 위치 추출: {location}")
+    chat_history = convert_history_to_messages(conversation_history or [])
+    all_messages = chat_history + [HumanMessage(content=user_query)]
+    
+    try:
+        result = agent.invoke({"messages": all_messages})
+        answer = ""
+        tools_used = []
+        
+        if "messages" in result:
+            for msg in reversed(result["messages"]):
+                if isinstance(msg, AIMessage):
+                    answer = msg.content
                     break
+            for msg in result["messages"]:
+                if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                    tools_used.extend(t["name"] for t in msg.tool_calls if isinstance(t, dict) and "name" in t)
+        
+        if not answer:
+            answer = "응답 생성 실패"
+        
+        new_history = (conversation_history or []) + [
+            {"role": "user", "content": user_query},
+            {"role": "ai", "content": answer},
+        ]
+        
+        logger.info(f"✅ Agent 완료 (사용된 도구: {list(set(tools_used))})")
+        return {"answer": answer, "conversation_history": new_history, "tools_used": list(set(tools_used))}
     
-    # 사용자 메시지 추가
-    initial_state["messages"].append({"role": "user", "content": user_query})
-    
-    # Graph 실행
-    result = graph.invoke(initial_state)
-    
-    # AI 응답 추가
-    if result["final_answer"]:
-        result["messages"].append({"role": "ai", "content": result["final_answer"]})
-    
-    logger.info(f"✅ Agent 완료: tools={result['selected_tools']}")
-    
-    return {
-        "answer": result["final_answer"],
-        "conversation_history": result["messages"],
-        "location": result.get("location"),
-        "tools_used": result["selected_tools"],
-        "map_data": result.get("map_results")
-    }
-    
-    
-    
+    except Exception as e:
+        logger.error(f"❌ Agent 실행 오류: {e}", exc_info=True)
+        fallback_answer = "죄송합니다. 일시적인 오류가 발생했습니다. 다시 시도해주세요. 🙏"
+        new_history = (conversation_history or []) + [
+            {"role": "user", "content": user_query},
+            {"role": "ai", "content": fallback_answer},
+        ]
+        return {"answer": fallback_answer, "conversation_history": new_history, "tools_used": []}

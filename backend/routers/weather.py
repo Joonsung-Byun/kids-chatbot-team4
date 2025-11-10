@@ -18,3 +18,6 @@ router = APIRouter(
 async def get_current_weather():
     """현재 날씨 도구 (팀원 구현 예정)"""
     return {"message": "날씨 API 구현 예정"}
+
+
+
