@@ -6,10 +6,8 @@ import ExamplePrompts from "./ExamplePrompts";
 
 interface Props {
   messages: Message[];
-  onPromptClick: (prompt: string) => void; // 👈 InputBox와 연결
+  onPromptClick: (prompt: string) => void;
 }
-
-
 
 const ChatWindow: React.FC<Props> = ({ messages, onPromptClick }) => {
   return (
@@ -23,10 +21,16 @@ const ChatWindow: React.FC<Props> = ({ messages, onPromptClick }) => {
           <div key={i}>
             {msg.type === "map" ? (
               <>
-                <MessageBubble role={msg.role} content={msg.content} />
+                {/* map 타입: 텍스트 + 지도 보기 버튼 + 지도 */}
+                <MessageBubble 
+                  role={msg.role} 
+                  content={msg.content} 
+                  link={msg.link} // 👈 link prop 전달
+                />
                 {msg.data && <KakaoMapView data={msg.data} />}
               </>
             ) : (
+              /* text 타입: 텍스트만 */
               <MessageBubble role={msg.role} content={msg.content} />
             )}
           </div>

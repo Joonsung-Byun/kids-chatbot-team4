@@ -17,4 +17,5 @@ export interface Message {
   content: string;
   type?: "text" | "map";
   data?: MapData | null;
+  link?: string;
 }
