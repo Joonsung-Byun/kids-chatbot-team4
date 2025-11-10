@@ -1,0 +1,47 @@
+# 도커 컴포즈 파일 버전 3.8을 사용합니다.
+version: '3.8'
+
+# 'services'는 우리가 실행할 컨테이너(앱)들의 묶음입니다.
+services:
+  
+  # 1. 'backend' 서비스 (우리의 FastAPI 서버)
+  backend:
+    build: ./backend  # ./backend 폴더에 있는 Dockerfile을 사용해 이미지를 만듭니다.
+    ports:
+      - "8000:8000"   # 내 PC의 8000 포트와 컨테이너의 8000 포트를 연결합니다.
+    volumes:
+      - ./backend:/app # 내 PC의 backend 코드를 컨테이너 /app 폴더와 실시간 동기화합니다.
+    depends_on:
+      - chromadb      # 'chromadb' 서비스가 켜진 후에 이 서비스를 실행합니다.
+    environment:
+      - CHROMA_URL=http://chromadb:8000 # FastAPI가 Chroma DB에 접근할 수 있도록 환경변수를 설정합니다.
+      # 2) 기상청 API 키
+      - WEATHER_API_KEY=18QmnxWNTM2EJp8VjWzNAQ
+      # 3) 카카오 API 키
+      - KAKAO_API_KEY=d0aaa9ff42c0da9e71a14519e0b7ac03
+
+
+  # 2. 'frontend' 서비스 (우리의 React/Vite 앱)
+  frontend:
+    build: ./frontend # ./frontend 폴더에 있는 Dockerfile을 사용합니다.
+    ports:
+      - "5173:5173"   # (Vite 기본 포트 예시) 내 PC 5173 포트와 컨테이너 5173 포트를 연결합니다.
+    volumes:
+      # 1) 코드는 덮어쓰되,
+      - ./frontend:/app 
+      # 2) node_modules 폴더는 컨테이너 내부의 것을 사용하도록 '예외' 처리
+      - /app/node_modules
+    depends_on:
+      - backend       # 'backend' 서비스가 켜진 후에 이 서비스를 실행합니다.
+
+  # 3. 'chromadb' 서비스 (우리의 Vector DB) - ★핵심★
+  chromadb:
+    image: chromadb/chroma # Docker Hub에서 Chroma DB 공식 이미지를 다운로드합니다. (Dockerfile 불필요)
+    ports:
+      - "8001:8000"   # 내 PC 8001 포트를 컨테이너 DB 8000 포트와 연결합니다.
+    volumes:
+      - ./chroma_data:/chroma/chroma # DB 데이터를 내 PC의 ./chroma_data 폴더에 영구 저장합니다.
+
+# 3번에서 정의한 'chroma_data' 볼륨을 공식적으로 선언합니다.
+volumes:
+  chroma_data:
