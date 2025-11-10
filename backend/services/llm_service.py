@@ -60,34 +60,34 @@ class LLMService:
             logger.error(f"❌ LLM 모델 로드 실패: {e}")
             self._use_gpu = False  # fallback to Mock
     
-    def generate_short_response(
-        self,
-        prompt: str,
-        max_tokens: int = 100
-    ) -> str:
-        """
-        analyze_query_with_llm 에서 JSON 파싱용으로 호출하는 단문 생성기.
-        """
-        # GPU 환경 실제 모델 호출
-        if self._use_gpu and self._model and self._tokenizer:
-            from transformers import GenerationConfig
-            inputs = self._tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=512
-            ).to(self._model.device)
-            gen_cfg = GenerationConfig(
-                temperature=0.7,
-                max_new_tokens=max_tokens,
-                top_p=0.9
-            )
-            with torch.no_grad():
-                out = self._model.generate(**inputs, generation_config=gen_cfg)
-            return self._tokenizer.decode(out[0], skip_special_tokens=True).strip()
+    # def generate_short_response(
+    #     self,
+    #     prompt: str,
+    #     max_tokens: int = 100
+    # ) -> str:
+    #     """
+    #     analyze_query_with_llm 에서 JSON 파싱용으로 호출하는 단문 생성기.
+    #     """
+    #     # GPU 환경 실제 모델 호출
+    #     if self._use_gpu and self._model and self._tokenizer:
+    #         from transformers import GenerationConfig
+    #         inputs = self._tokenizer(
+    #             prompt,
+    #             return_tensors="pt",
+    #             truncation=True,
+    #             max_length=512
+    #         ).to(self._model.device)
+    #         gen_cfg = GenerationConfig(
+    #             temperature=0.7,
+    #             max_new_tokens=max_tokens,
+    #             top_p=0.9
+    #         )
+    #         with torch.no_grad():
+    #             out = self._model.generate(**inputs, generation_config=gen_cfg)
+    #         return self._tokenizer.decode(out[0], skip_special_tokens=True).strip()
 
-        # Mock 모드: 최소한 빈 JSON이라도 반환
-        return "{}"
+    #     # Mock 모드: 최소한 빈 JSON이라도 반환
+    #     return "{}"
     
     def generate_answer(
         self,
