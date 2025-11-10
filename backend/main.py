@@ -83,7 +83,14 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     
+    swagger_url = f"http://localhost:{settings.PORT}/docs"
+    redoc_url = f"http://localhost:{settings.PORT}/redoc"
+    root_url = f"http://localhost:{settings.PORT}/"
+    
     logger.info("🚀 키즈 액티비티 챗봇 API 서버 시작")
+    logger.info(f"📘 Swagger UI: {swagger_url}")
+    logger.info(f"📕 ReDoc:       {redoc_url}")
+    logger.info(f"🏠 Root:        {root_url}")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
