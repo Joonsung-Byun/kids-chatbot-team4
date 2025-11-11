@@ -30,6 +30,7 @@ class LLMService:
         self.settings = get_settings()
         self._tokenizer = None
         self._model = None
+        self._model_name = None  # 🔥 추가: Agent에서 사용
         self._use_gpu = self._detect_gpu()
 
         if self._use_gpu:
@@ -49,45 +50,24 @@ class LLMService:
         """GPU 환경에서 실제 LLM 모델 및 토크나이저 로드"""
         try:
             model_name = self.settings.GENERATION_MODEL
+            self._model_name = model_name  # 🔥 추가: 모델명 저장
+            
             logger.info(f"🔄 LLM 모델 로딩: {model_name}")
             self._tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
             self._model = AutoModelForCausalLM.from_pretrained(
-                model_name, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True
+                model_name, 
+                device_map="auto", 
+                torch_dtype=torch.float16, 
+                trust_remote_code=True
             )
             self._model.eval()
-            logger.info("✅ LLM 모델 로드 완료")
+            logger.info(f"✅ LLM 모델 로드 완료: {model_name}")
         except Exception as e:
             logger.error(f"❌ LLM 모델 로드 실패: {e}")
             self._use_gpu = False  # fallback to Mock
-    
-    # def generate_short_response(
-    #     self,
-    #     prompt: str,
-    #     max_tokens: int = 100
-    # ) -> str:
-    #     """
-    #     analyze_query_with_llm 에서 JSON 파싱용으로 호출하는 단문 생성기.
-    #     """
-    #     # GPU 환경 실제 모델 호출
-    #     if self._use_gpu and self._model and self._tokenizer:
-    #         from transformers import GenerationConfig
-    #         inputs = self._tokenizer(
-    #             prompt,
-    #             return_tensors="pt",
-    #             truncation=True,
-    #             max_length=512
-    #         ).to(self._model.device)
-    #         gen_cfg = GenerationConfig(
-    #             temperature=0.7,
-    #             max_new_tokens=max_tokens,
-    #             top_p=0.9
-    #         )
-    #         with torch.no_grad():
-    #             out = self._model.generate(**inputs, generation_config=gen_cfg)
-    #         return self._tokenizer.decode(out[0], skip_special_tokens=True).strip()
-
-    #     # Mock 모드: 최소한 빈 JSON이라도 반환
-    #     return "{}"
+            self._model = None
+            self._tokenizer = None
+            self._model_name = None
     
     def generate_answer(
         self,

@@ -3,20 +3,22 @@ version: '3.8'
 services:
   # ChromaDB 로컬 서버
   chromadb:
-    image: chromadb/chroma:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.chroma
     container_name: kids-chatbot-chromadb
     ports:
       - "8000:8000"
     volumes:
-      - ./chroma_data:/chroma/storage   # ✅ 실제 데이터 보존 경로
+      - ./chroma_data:/chroma/storage
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    # healthcheck:
+    #   test: ["CMD-SHELL", "wget -q --spider http://localhost:8000/api/v1/collections || exit 1"]
+    #   interval: 15s
+    #   timeout: 10s
+    #   retries: 5
     networks:
       - chatbot-network
 
@@ -49,8 +51,8 @@ services:
       - DEBUG=true
       - PORT=3001
     depends_on:
-      chromadb:
-        condition: service_healthy
+      - chromadb
+        # condition: service_healthy
     networks:
       - chatbot-network
     command: uvicorn main:app --host 0.0.0.0 --port 3001 --reload # 배포할땐 --reload 제거하기
