@@ -474,6 +474,7 @@ def get_tools():
     """사용 가능한 도구 목록"""
     return [weather_tool, rag_search_tool]
 
+
 # ============================================================
 # Tool 정의 (LangGraph 방식)
 # ============================================================
@@ -484,6 +485,7 @@ def weather_tool(location: str) -> str:
     try:
         logger.info(f"[WeatherTool] 호출: {location}")
         result = get_weather(location=location, target_date=None)
+        
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         logger.error(f"[WeatherTool] 오류: {e}")

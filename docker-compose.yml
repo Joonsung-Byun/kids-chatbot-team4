@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./chroma_data:/chroma/chroma  # 데이터 영속성
+      - ./chroma_data:/chroma/storage   # ✅ 실제 데이터 보존 경로
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
@@ -53,7 +53,7 @@ services:
         condition: service_healthy
     networks:
       - chatbot-network
-    command: uvicorn main:app --host 0.0.0.0 --port 3001 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 3001 --reload # 배포할땐 --reload 제거하기
 
   # Backend API (GPU 버전) - 선택적 사용
   backend-gpu:
