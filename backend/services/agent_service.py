@@ -19,7 +19,8 @@ from services.rag_service import get_rag_service
 from services.weather_service import get_weather
 from services.map_service import get_map_markers
 from utils.logger import logger
-
+from dotenv import load_dotenv
+load_dotenv()
 
 # ============================================================
 # Tool 정의 (LangGraph 방식)
@@ -31,6 +32,7 @@ def weather_tool(location: str) -> str:
     try:
         logger.info(f"[WeatherTool] 호출: {location}")
         result = get_weather(location=location, target_date=None)
+        
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         logger.error(f"[WeatherTool] 오류: {e}")
