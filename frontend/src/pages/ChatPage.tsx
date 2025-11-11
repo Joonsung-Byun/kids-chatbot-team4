@@ -28,15 +28,8 @@ const handleSend = async (userMessage: string) => {
   addMessage(userMsg);
 
   // 여기를 수정! ↓
-  // const res = await mockChatAPI(userMessage);  ← 이 줄을 아래로 교체
-  const res = await fetch('http://localhost:3001/chat/message', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: userMessage })
-  });
-  const data = await res.json();
-  
-  addMessage(data);  // res → data로 변경
+  const res = await mockChatAPI(userMessage); 
+  addMessage(res);
 };
 
 window.addEventListener("beforeunload", () => {

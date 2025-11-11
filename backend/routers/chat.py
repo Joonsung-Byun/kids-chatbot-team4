@@ -1,4 +1,5 @@
 # routers/chat.py
+
 """
 Chat Router - LangChain Agent 통합
 """
@@ -60,15 +61,29 @@ async def chat_message(request: ChatRequest) -> ChatResponse:
         # 4. 히스토리 저장
         save_history(conversation_id, result["conversation_history"])
         
-        logger.info(f"✅ 응답 생성 완료")
+        logger.info(f"✅ 응답 생성 완료 (타입: {result['response_type']})")
         
-        # 5. 응답 반환
-        return ChatResponse(
-            role="ai",
-            content=result["answer"],
-            type="text",
-            conversation_id=conversation_id
-        )
+        # 5. 응답 타입에 따라 반환
+        if result["response_type"] == "map":
+            # 지도 응답
+            return ChatResponse(
+                role="ai",
+                content=result["answer"],
+                type="map",
+                link=result.get("map_link"),
+                data=result.get("map_data"),
+                conversation_id=conversation_id
+            )
+        else:
+            # 텍스트 응답
+            return ChatResponse(
+                role="ai",
+                content=result["answer"],
+                type="text",
+                link=None,
+                data=None,
+                conversation_id=conversation_id
+            )
     
     except Exception as e:
         logger.error(f"❌ 챗봇 처리 중 오류: {e}", exc_info=True)
@@ -80,6 +95,8 @@ async def chat_message(request: ChatRequest) -> ChatResponse:
             role="ai",
             content="죄송합니다. 일시적인 오류가 발생했습니다. 다시 시도해주세요.",
             type="text",
+            link=None,
+            data=None,
             conversation_id=error_conversation_id
         )
 

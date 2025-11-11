@@ -18,46 +18,22 @@ class MapMarker(BaseModel):
 
 
 class MapData(BaseModel):
-    """지도 전체 데이터를 묶는 모델"""
-    center: Dict[str, float]          # 중심 좌표: {"lat": float, "lng": float}
-    markers: List[MapMarker]          # 지도에 표시할 마커 목록
-
+    """지도 데이터 구조"""
+    center: Dict[str, float] = Field(..., description="지도 중심 좌표 {lat, lng}")
+    markers: List[Dict[str, Any]] = Field(..., description="마커 리스트")
 
 class ChatRequest(BaseModel):
-    """클라이언트 → 서버 채팅 요청 모델"""
-    message: str = Field(
-        ..., 
-        description="사용자가 입력한 메시지"
-    )
-    conversation_id: Optional[str] = Field(
-        None, 
-        description="대화 세션 ID (UUID)"
-    )
+    message: str = Field(..., description="사용자 메시지")
+    conversation_id: Optional[str] = Field(None, description="대화 ID")
 
 
 class ChatResponse(BaseModel):
-    """서버 → 클라이언트 채팅 응답 모델"""
-    role: str = Field(
-        "ai", 
-        description="메시지 역할 (user | ai)"
-    )
-    content: str = Field(
-        ..., 
-        description="AI가 생성한 메시지 텍스트"
-    )
-    type: Optional[str] = Field(
-        "text", 
-        description="응답 타입 (text | map)"
-    )
-    data: Optional[MapData] = Field(
-        None, 
-        description="지도 데이터 (type='map'일 때 포함)"
-    )
-    conversation_id: Optional[str] = Field(
-        None,
-        description="대화 세션 ID (클라이언트에 반환)"
-    )
-
+    role: str = Field(..., description="메시지 역할 (user/ai)")
+    content: str = Field(..., description="메시지 내용")
+    type: str = Field(default="text", description="응답 타입 (text/map)")
+    link: Optional[str] = Field(None, description="카카오맵 링크 (지도 응답 시)")
+    data: Optional[Dict[str, Any]] = Field(None, description="지도 데이터 (지도 응답 시)")
+    conversation_id: str = Field(..., description="대화 ID")
 
 # ============================================================
 # LangGraph용 TypedDict 스키마

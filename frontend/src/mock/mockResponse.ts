@@ -9,7 +9,7 @@ export function mockChatAPI(userMessage: string): Promise<Message> {
           role: "ai",
           type: "map",
           content: "",
-          link: "https://map.kakao.com/link/to/한남어린이공원,37.5341,127.0013",
+          link: "https://map.kakao.com/link/to/강남어린이공원,37.4979,127.0276",
           data: {
             center: { lat: 37.533, lng: 127.002 },
             markers: [
