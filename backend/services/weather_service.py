@@ -23,3 +23,4 @@ def get_weather(location: str) -> Dict[str, Any]:
       }
     """
     return {"location": location, "status": "sunny"}
+

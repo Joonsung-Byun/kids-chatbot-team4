@@ -18,3 +18,5 @@ router = APIRouter(
 async def search_map():
     """지도 검색 도구 (팀원 구현 예정)"""
     return {"message": "지도 API 구현 예정"}
+
+
