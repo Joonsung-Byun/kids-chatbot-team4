@@ -3,9 +3,7 @@ version: '3.8'
 services:
   # ChromaDB 로컬 서버
   chromadb:
-    build:
-      context: .
-      dockerfile: Dockerfile.chroma
+    image: chromadb/chroma:latest
     container_name: kids-chatbot-chromadb
     ports:
       - "8000:8000"
@@ -93,6 +91,24 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 3001 --reload
     profiles:
       - gpu  # GPU 프로파일 (명시적으로 활성화 필요)
+  
+  # Frontend (React/Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile  # frontend 폴더에 Dockerfile 필요
+    container_name: kids-chatbot-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # node_modules는 컨테이너 내부 것 사용
+    environment:
+      - VITE_API_URL=http://localhost:3001  # Backend URL
+    depends_on:
+      - backend-cpu
+    networks:
+      - chatbot-network
 
 networks:
   chatbot-network:
