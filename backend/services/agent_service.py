@@ -18,6 +18,7 @@ from services.llm_service import get_llm_service
 from services.rag_service import get_rag_service
 from services.weather_service import get_weather
 from services.map_service import get_map_markers
+from data.location import KMA_LOCATION_CODES, DONG_TO_CITY, LANDMARK_TO_CITY, UNIVERSITY_TO_CITY, LOCATION_MAP
 from utils.logger import logger
 
 
@@ -180,29 +181,75 @@ def get_rag_results_from_history(history: List[Dict[str, str]]) -> List[Dict[str
 
 
 def extract_location(text: str) -> Optional[str]:
-    """텍스트에서 위치 정보 추출"""
-    cities = [
-        "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
-        "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주"
-    ]
-    
-    districts = [
-        "강남", "서초", "송파", "강동", "마포", "용산", "성동", "광진",
-        "중구", "종로", "은평", "서대문", "동대문", "성북", "강북", "도봉",
-        "노원", "동작", "관악", "금천", "구로", "영등포", "양천", "강서"
-    ]
-    
-    for city in cities:
+    """
+    사용자가 입력한 텍스트에서 도시/구/동/명소 등 위치를 최대한 정밀하게 인식해
+    대표 도시명(예: 서울, 부산, 제주 등)으로 반환.
+    """
+
+    text = text.strip().replace(" ", "")  # 공백 제거 (예: "한 남 동" → "한남동")
+
+    # 1️⃣ KMA 지역코드 기반: 도시/군/구 단위 직접 매칭
+    for city in KMA_LOCATION_CODES.keys():
         if city in text:
-            for district in districts:
-                if district in text:
-                    return f"{city} {district}"
             return city
-    
-    for district in districts:
-        if district in text:
-            return f"서울 {district}"
-    
+
+    # 2️⃣ DONG_TO_CITY: 동(洞) → 도시 매핑
+    for dong, city in DONG_TO_CITY.items():
+        if dong in text:
+            return city
+
+    # 3️⃣ LANDMARK_TO_CITY: 명소/관광지 → 도시 매핑
+    for landmark, city in LANDMARK_TO_CITY.items():
+        if landmark in text:
+            return city
+
+    # 4️⃣ UNIVERSITY_TO_CITY: 대학교 → 도시 매핑
+    for univ, city in UNIVERSITY_TO_CITY.items():
+        if univ in text:
+            return city
+
+    # 5️⃣ LOCATION_MAP: 추가 확장명소/상권 등
+    for city, names in LOCATION_MAP.items():
+        for name in names:
+            if name in text:
+                return city
+
+    # 6️⃣ 보정 규칙 (자주 등장하는 표현)
+    keyword_city_map = {
+        "한강": "서울", "청계천": "서울", "남산": "서울", "광안리": "부산",
+        "감천문화마을": "부산", "남이섬": "가평", "설악산": "속초", "에버랜드": "용인",
+        "롯데월드": "서울", "경주월드": "경주", "전주한옥마을": "전주",
+        "한라산": "제주", "성심당": "대전"
+    }
+    for kw, city in keyword_city_map.items():
+        if kw in text:
+            return city
+
+    # 7️⃣ 패턴기반 추론 (예: ~카페거리, ~해수욕장, ~시장)
+    if "카페거리" in text:
+        if "성수" in text or "홍대" in text or "연남" in text:
+            return "서울"
+        if "애월" in text:
+            return "제주"
+        if "온천천" in text:
+            return "부산"
+    if "해수욕장" in text:
+        if "광안" in text or "해운대" in text or "송정" in text:
+            return "부산"
+        if "함덕" in text or "협재" in text:
+            return "제주"
+        if "낙산" in text or "경포" in text:
+            return "강릉"
+        if "대천" in text:
+            return "보령"
+    if "시장" in text:
+        if "남대문" in text or "광장" in text or "통인" in text:
+            return "서울"
+        if "서문" in text:
+            return "대구"
+        if "자갈치" in text or "국제시장" in text:
+            return "부산"
+
     return None
 
 
