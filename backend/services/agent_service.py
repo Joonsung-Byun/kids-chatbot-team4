@@ -607,7 +607,6 @@ def _get_mock_rag_results(location: str) -> List[Dict[str, Any]]:
         }
     ]
 
-
 def _generate_final_answer(
     query: str,
     location: str,
@@ -615,31 +614,20 @@ def _generate_final_answer(
     facilities: List[Dict[str, Any]]
 ) -> str:
     """최종 답변 생성"""
-    llm_service = get_llm_service()
+    llm = get_llm()  # ✅ 새로 추가한 함수로 LLM 자동 선택
     
-    if llm_service._use_gpu and llm_service._model:
-        try:
-            return _generate_with_llm(query, location, weather, facilities, llm_service)
-        except Exception as e:
-            logger.error(f"❌ LLM 생성 실패: {e}")
-    
-    return _generate_mock_answer(location, weather, facilities)
+    try:
+        context = f"위치: {location}\n"
+        context += f"날씨: {weather.get('description', '알 수 없음')} ({weather.get('temp', 0)}°C)\n\n"
+        context += "추천 시설:\n"
+        for i, doc in enumerate(facilities[:3], 1):
+            meta = doc.get("metadata", {})
+            context += f"{i}. {meta.get('facility_name', 'N/A')}\n"
+            context += f"   - 위치: {meta.get('signgu_nm', '')}\n"
+            context += f"   - 분류: {meta.get('category1', '')}\n"
+            context += f"   - 가격: {meta.get('price', '무료')}\n\n"
 
-
-def _generate_with_llm(query, location, weather, facilities, llm_service) -> str:
-    """실제 LLM으로 답변 생성"""
-    context = f"위치: {location}\n"
-    context += f"날씨: {weather.get('description', '알 수 없음')} ({weather.get('temp', 0)}°C)\n\n"
-    context += "추천 시설:\n"
-    
-    for i, doc in enumerate(facilities[:3], 1):
-        meta = doc.get("metadata", {})
-        context += f"{i}. {meta.get('facility_name', 'N/A')}\n"
-        context += f"   - 위치: {meta.get('signgu_nm', '')}\n"
-        context += f"   - 분류: {meta.get('category1', '')}\n"
-        context += f"   - 가격: {meta.get('price', '무료')}\n\n"
-    
-    prompt = f"""아래 정보를 바탕으로 사용자 질문에 친절하게 답변해주세요.
+        prompt = f"""아래 정보를 바탕으로 사용자 질문에 친절하게 답변해주세요.
 
 {context}
 
@@ -652,29 +640,71 @@ def _generate_with_llm(query, location, weather, facilities, llm_service) -> str
 - 따뜻하고 친근한 톤
 
 답변:"""
+
+        # LLM 실행
+        if hasattr(llm, "invoke"):
+            result = llm.invoke(prompt)
+            if isinstance(result, str):
+                return result.strip()
+            elif hasattr(result, "content"):
+                return result.content.strip()
+        
+        return _generate_mock_answer(location, weather, facilities)
+
+    except Exception as e:
+        logger.error(f"❌ LLM 생성 실패: {e}")
+        return _generate_mock_answer(location, weather, facilities)
     
-    from transformers import GenerationConfig
-    inputs = llm_service._tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=1024
-    ).to(llm_service._model.device)
+
+# def _generate_with_llm(query, location, weather, facilities, llm_service) -> str:
+#     """실제 LLM으로 답변 생성"""
+#     context = f"위치: {location}\n"
+#     context += f"날씨: {weather.get('description', '알 수 없음')} ({weather.get('temp', 0)}°C)\n\n"
+#     context += "추천 시설:\n"
     
-    gen_cfg = GenerationConfig(
-        temperature=0.7,
-        max_new_tokens=300,
-        top_p=0.9
-    )
+#     for i, doc in enumerate(facilities[:3], 1):
+#         meta = doc.get("metadata", {})
+#         context += f"{i}. {meta.get('facility_name', 'N/A')}\n"
+#         context += f"   - 위치: {meta.get('signgu_nm', '')}\n"
+#         context += f"   - 분류: {meta.get('category1', '')}\n"
+#         context += f"   - 가격: {meta.get('price', '무료')}\n\n"
     
-    import torch
-    with torch.no_grad():
-        out = llm_service._model.generate(**inputs, generation_config=gen_cfg)
+#     prompt = f"""아래 정보를 바탕으로 사용자 질문에 친절하게 답변해주세요.
+
+# {context}
+
+# 사용자 질문: {query}
+
+# 답변 작성 가이드:
+# - 날씨 정보를 먼저 언급
+# - 추천 시설 3개를 구체적으로 소개
+# - 이모지 사용 (🎨, 🏃‍♂️, 📍)
+# - 따뜻하고 친근한 톤
+
+# 답변:"""
     
-    answer = llm_service._tokenizer.decode(out[0], skip_special_tokens=True)
-    answer = answer.split("답변:")[-1].strip()
+#     from transformers import GenerationConfig
+#     inputs = llm_service._tokenizer(
+#         prompt,
+#         return_tensors="pt",
+#         truncation=True,
+#         max_length=1024
+#     ).to(llm_service._model.device)
     
-    return answer
+#     gen_cfg = GenerationConfig(
+#         temperature=0.7,
+#         max_new_tokens=300,
+#         top_p=0.9
+#     )
+    
+#     import torch
+#     with torch.no_grad():
+#         out = llm_service._model.generate(**inputs, generation_config=gen_cfg)
+    
+#     answer = llm_service._tokenizer.decode(out[0], skip_special_tokens=True)
+#     answer = answer.split("답변:")[-1].strip()
+    
+#     return answer
 
 
 def _generate_mock_answer(location: str, weather: Dict[str, Any], facilities: List[Dict[str, Any]]) -> str:
@@ -740,3 +770,67 @@ def _append_rag_metadata(
         logger.error(f"❌ RAG 메타데이터 추가 실패: {e}")
     
     return history
+
+
+import os
+from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
+
+class MockChatModel:
+    """간단한 Mock LLM (GPU/OPENAI 미사용 시 대체)"""
+    def invoke(self, prompt: str) -> str:
+        return "Mock 모드입니다. 실제 LLM이 활성화되지 않았습니다."
+
+def get_llm():
+    """GPU 환경 또는 OpenAI API 환경에 맞게 LLM을 선택"""
+    llm_service = get_llm_service()
+
+    # 1️⃣ OpenAI API 사용
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            from langchain_openai import ChatOpenAI
+            logger.info("✅ OpenAI LLM 사용 (gpt-4o)")
+            return ChatOpenAI(model="gpt-4o", temperature=0.7)
+        except ImportError:
+            logger.warning("⚠️ langchain-openai 미설치 → Mock 모드")
+            return MockChatModel()
+
+    # 2️⃣ GPU 모델 사용 (HuggingFace) - ChatHuggingFace로 래핑
+    elif llm_service._use_gpu and llm_service._model and llm_service._tokenizer:
+        try:
+            from transformers import pipeline
+            
+            logger.info(f"✅ GPU 감지됨 → ChatHuggingFace 사용 (모델: {llm_service._model_name})")
+            
+            # Step 1: transformers pipeline 생성
+            pipe = pipeline(
+                "text-generation",
+                model=llm_service._model,
+                tokenizer=llm_service._tokenizer,
+                max_new_tokens=512,
+                temperature=0.7,
+                do_sample=True,
+                top_p=0.9,
+                repetition_penalty=1.1
+            )
+            
+            # Step 2: HuggingFacePipeline로 래핑
+            llm = HuggingFacePipeline(pipeline=pipe)
+            
+            # Step 3: ChatHuggingFace로 한 번 더 래핑 (bind_tools 지원)
+            chat_model = ChatHuggingFace(llm=llm)
+            
+            logger.info("✅ ChatHuggingFace 래핑 완료")
+            return chat_model
+            
+        except ImportError as e:
+            logger.warning(f"⚠️ 필요한 라이브러리 미설치: {e} → Mock 모드")
+            return MockChatModel()
+        except Exception as e:
+            logger.error(f"❌ HuggingFace LLM 로드 실패: {e} → Mock 모드")
+            import traceback
+            traceback.print_exc()
+            return MockChatModel()
+
+    # 3️⃣ CPU 기본 Mock
+    logger.info("🧩 CPU 환경 → Mock LLM 사용")
+    return MockChatModel()

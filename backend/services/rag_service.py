@@ -88,8 +88,14 @@ class RAGService:
 
             # 리랭킹
             if self._cross_encoder:
-                unique_docs = self._rerank(query, unique_docs)
+                reranked = self._rerank(query, unique_docs)
+                if not reranked or len(reranked) == 0:
+                    logger.warning("⚠️ 리랭킹 결과가 비어 있음 → 원본 상위 N개 유지")
+                    unique_docs = unique_docs[: self.settings.RERANK_TOP_K]
+                else:
+                    unique_docs = reranked
             else:
+                logger.info("💡 GPU 비활성화 환경 → 리랭킹 생략, 상위 N개 그대로 사용")
                 unique_docs = unique_docs[: self.settings.RERANK_TOP_K]
 
             # MMR 필터링 (현재는 상위 N개 추출)
@@ -102,28 +108,38 @@ class RAGService:
             return []
 
     def _format_results(self, res: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """ChromaDB 결과 포맷 변환"""
-        docs, metas, dists = res["documents"][0], res["metadatas"][0], res["distances"][0]
-        return [
-            {
-                "content": doc,
-                "metadata": meta,
+        """ChromaDB 결과 포맷 변환 (빈 문서 예외 처리)"""
+        if not res or not res.get("documents") or not res["documents"][0]:
+            return []
+
+        docs = res.get("documents", [[]])[0]
+        metas = res.get("metadatas", [[]])[0]
+        dists = res.get("distances", [[]])[0]
+
+        formatted = []
+        for doc, meta, dist in zip(docs, metas, dists):
+            if not doc or doc.strip() == "":
+                continue
+            formatted.append({
+                "content": doc.strip(),
+                "metadata": meta or {},
                 "distance": dist,
-                "similarity": 1 - dist,
-            }
-            for doc, meta, dist in zip(docs, metas, dists)
-        ]
+                "similarity": round(1 - float(dist), 4)
+            })
+
+        return formatted
 
     def _dedupe(self, docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """facility_name 기준 중복 제거"""
+        """시설명 기준 중복 제거 (facility_name / Name 대응)"""
         seen, unique = set(), []
         for d in docs:
-            name = d["metadata"].get("facility_name")
+            meta = d.get("metadata", {})
+            name = meta.get("facility_name") or meta.get("Name")  # ✅ 핵심 수정
             if name and name not in seen:
                 seen.add(name)
                 unique.append(d)
         return unique
-
+    
     def _rerank(self, query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """크로스인코더로 리랭킹"""
         try:

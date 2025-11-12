@@ -266,3 +266,12 @@ dist/
 # Config files with sensitive data
 config.json
 secrets.json
+
+# ChromaDB local data
+chroma_data/
+*.sqlite3
+*.bin
+*.pickle
+
+backend/data/*.csv
+*.csv

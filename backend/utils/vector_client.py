@@ -154,11 +154,13 @@ class VectorClient:
             # 쿼리 임베딩
             query_embedding = self._encode_query(query_text)
             
-            # ChromaDB 검색
+            # ✅ 빈 where는 None으로 대체해야 함
+            where_clause = where if where and len(where.keys()) > 0 else None
+
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where,
+                where=where_clause,
                 where_document=where_document,
                 include=["documents", "metadatas", "distances"]
             )
